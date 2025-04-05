@@ -6,9 +6,14 @@ export default function Navbar() {
       <h1 className="text-xl font-bold">SAT AI Tutor</h1>
       <div>
         <Link href="/dashboard" className="mr-4">
-          Dashboard
+          Practice
         </Link>
-        <Link href="/login">Login</Link>
+        <Link href="/performance" className="mr-4">
+          Performance
+        </Link>
+        <Link href="/login">
+          Login
+        </Link>
       </div>
     </nav>
   );

@@ -11,6 +11,13 @@ from datetime import datetime
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory
 from langchain.llms import OpenAI
+from typing import Optional
+
+# Import our modules
+from performance_tracking import router as performance_router, EnhancedUserAnswer
+from adaptive_difficulty import router as adaptive_router
+# Import the functions directly from adaptive_difficulty
+from adaptive_difficulty import recommend_difficulty, get_user_ability
 
 # Load API Keys & Supabase Credentials
 load_dotenv()
@@ -31,6 +38,9 @@ app.add_middleware(
 )
 ALLOWED_TOPICS = {"Algebra", "Geometry", "Grammar", "Reading Comprehension", "Trigonometry"}
 
+# Include the routers
+app.include_router(performance_router, tags=["Performance Tracking"])
+app.include_router(adaptive_router, tags=["Adaptive Difficulty"])
 
 # Define the SAT Question Model
 class SATQuestion(BaseModel):
@@ -40,27 +50,64 @@ class SATQuestion(BaseModel):
     correct_answer: str
     solution: str
     hint: str
+    passage: Optional[str] = None  
 
 # Generate SAT Question + Hint Using LangChain
-def generate_sat_question(topic: str) -> dict:
+def generate_sat_question(topic: str, difficulty_level: int = 3) -> dict:
     llm = ChatOpenAI(model_name="gpt-4o", openai_api_key=OPENAI_API_KEY)
     parser = JsonOutputParser(pydantic_object=SATQuestion)
 
-    prompt = PromptTemplate(
-        template="Generate a multiple-choice SAT question about {topic}. "
-                  "Provide four answer choices (A, B, C, D). Include a hint before revealing the correct answer."
-                  "{format_instructions}",
-        input_variables=["topic"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
+    # Updated prompt to include difficulty level
+    difficulty_descriptions = {
+        1: "very easy (suitable for beginners)",
+        2: "somewhat easy (for review)",
+        3: "medium difficulty (standard SAT level)",
+        4: "challenging (for advanced students)",
+        5: "very challenging (for high-performers)"
+    }
+    
+    difficulty_desc = difficulty_descriptions.get(difficulty_level, "medium difficulty (standard SAT level)")
+    
+    # Create different templates based on topic
+    if topic == "Reading Comprehension":
+        prompt = PromptTemplate(
+            template="Generate a {difficulty} SAT Reading Comprehension question with the following format:\n"
+                     "1. First, create a passage (about 200-300 words) on a topic suitable for SAT.\n"
+                     "2. Then, create a question about the passage.\n"
+                     "3. Provide four answer choices (A, B, C, D).\n"
+                     "4. Include a hint before revealing the correct answer.\n"
+                     "5. Explain why the correct answer is correct.\n\n"
+                     "The question should be labeled as 'question' and should ONLY ask about the passage you generated.\n"
+                     "The passage should be labeled as 'passage' in your JSON output.\n"
+                     "{format_instructions}",
+            input_variables=["difficulty"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
+    else:
+        prompt = PromptTemplate(
+            template="Generate a {difficulty} multiple-choice SAT question about {topic}. "
+                     "Provide four answer choices (A, B, C, D). Include a hint before revealing the correct answer. "
+                     "{format_instructions}",
+            input_variables=["topic", "difficulty"],
+            partial_variables={"format_instructions": parser.get_format_instructions()},
+        )
 
-    # Invoke LLM
-    response_dict = (prompt | llm | parser).invoke({"topic": topic})
+    # Invoke LLM with appropriate parameters
+    if topic == "Reading Comprehension":
+        response_dict = (prompt | llm | parser).invoke({"difficulty": difficulty_desc})
+    else:
+        response_dict = (prompt | llm | parser).invoke({
+            "topic": topic, 
+            "difficulty": difficulty_desc
+        })
 
     # Convert to Pydantic model
     question_obj = SATQuestion(**response_dict)
     question_data = question_obj.dict()
 
+    # Add metadata about the difficulty level
+    question_data["difficulty_level"] = difficulty_level
+    
     result = supabase.table("questions").insert(question_data).execute()
 
     if not result.data:
@@ -71,15 +118,69 @@ def generate_sat_question(topic: str) -> dict:
     question_data["question_id"] = inserted_id
     return question_data
 
-
-
 @app.get("/generate-question")
-async def generate_question(topic: str = Query(..., title="SAT Topic")):
+async def generate_question(
+    topic: str = Query(..., title="SAT Topic"),
+    difficulty_level: int = Query(3, ge=1, le=5, title="Difficulty Level"),
+    user_id: str = Query(None, title="User ID for Adaptive Difficulty")
+):
     if topic not in ALLOWED_TOPICS:
         raise HTTPException(status_code=400, detail="Invalid topic. Choose an SAT-relevant subject.")
     
-    return generate_sat_question(topic)
+    # If user_id is provided, use adaptive difficulty
+    if user_id:
+        try:
+            # Get recommended difficulty for this user and topic
+            recommendation = await recommend_difficulty(
+                user_id=user_id,
+                topic=topic,
+                challenge_mode=False
+            )
+            difficulty_level = recommendation["difficulty_level"]
+            print(f"Using adaptive difficulty level {difficulty_level} for user {user_id}")
+        except Exception as e:
+            print(f"Error getting adaptive difficulty: {str(e)}")
+            # Fall back to default difficulty
+            pass
+    
+    return generate_sat_question(topic, difficulty_level)
 
+@app.get("/generate-adaptive-question")
+async def generate_adaptive_question(
+    user_id: str = Query(..., title="User ID"),
+    topic: str = Query(..., title="SAT Topic"),
+    challenge_mode: bool = Query(False, title="Challenge Mode")
+):
+    """
+    Generate a question with difficulty adapted to the user's ability level.
+    """
+    if topic not in ALLOWED_TOPICS:
+        raise HTTPException(status_code=400, detail="Invalid topic. Choose an SAT-relevant subject.")
+    
+    try:
+        # Get recommended difficulty for this user and topic
+        # Call the function directly instead of through the router
+        recommendation = await recommend_difficulty(
+            user_id=user_id,
+            topic=topic,
+            challenge_mode=challenge_mode
+        )
+        
+        # Generate a question with the recommended difficulty
+        question_data = generate_sat_question(topic, recommendation["difficulty_level"])
+        
+        # Add adaptive info to the response
+        question_data["adaptive_info"] = {
+            "user_ability": recommendation["estimated_ability"],
+            "recommended_difficulty": recommendation["difficulty_level"],
+            "challenge_mode": challenge_mode
+        }
+        
+        return question_data
+        
+    except Exception as e:
+        print(f"Error generating adaptive question: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate adaptive question: {str(e)}")
 
 @app.get("/generate-hint")
 async def generate_hint(topic: str = Query(..., title="SAT Topic"), question: str = Query(..., title="SAT Question")):
@@ -103,20 +204,18 @@ async def generate_hint(topic: str = Query(..., title="SAT Topic"), question: st
 
     return {"hint": hint_text}
 
-class UserAnswer(BaseModel):
-    user_id: str
-    topic: str
-    question_id: str
-    user_answer: str
-    correct: bool
-    confidence: int = Field(..., ge=1, le=5)
-
 @app.post("/submit-answer")
-async def submit_answer(answer: UserAnswer):
+async def submit_answer(answer: EnhancedUserAnswer):
     try:
-        print("📌 Received Answer Submission:", answer.dict())  # ✅ Debugging
+        print("📌 Received Answer Submission:", answer.dict())
 
-        response = supabase.table("user_progress").insert(answer.dict()).execute()
+        # Create a dict from the model, manually handling the timestamp
+        answer_dict = answer.dict(exclude={"timestamp"})
+        
+        # Add the current timestamp in ISO format
+        answer_dict["timestamp"] = datetime.utcnow().isoformat()
+
+        response = supabase.table("user_progress").insert(answer_dict).execute()
 
         if response.data and isinstance(response.data, dict) and "error" in response.data:
             raise HTTPException(status_code=500, detail=response.data["error"])
@@ -124,9 +223,8 @@ async def submit_answer(answer: UserAnswer):
         return {"message": "Answer recorded successfully!"}
 
     except Exception as e:
-        print("❌ Error submitting answer:", str(e))  # ✅ Log error
+        print("❌ Error submitting answer:", str(e))
         raise HTTPException(status_code=400, detail=str(e))
-
 
 class TutorChatRequest(BaseModel):
     user_id: str
@@ -226,33 +324,6 @@ async def tutor_chat(request: TutorChatRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# @app.post("/tutor-chat")
-# async def tutor_chat(request: TutorChatRequest):
-#     """
-#     Receives user message, generates AI response, stores in Supabase, and returns chat history.
-#     """
-
-#     # Simulate AI Response (Replace with actual AI logic)
-#     ai_response = f"Here's an explanation for: {request.message}"
-
-#     # Store chat in Supabase
-#     chat_data = {
-#         "user_id": request.user_id,
-#         "user_message": request.message,
-#         "tutor_response": ai_response
-#     }
-
-#     try:
-#         result = supabase.table("tutor_chat").insert(chat_data).execute()
-#         if result.data:
-#             return {"user_message": request.message, "tutor_response": ai_response}
-#         else:
-#             raise HTTPException(status_code=500, detail="Failed to store chat in database")
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/user-chat")
 async def get_user_chat(user_id: str = Query(...)):

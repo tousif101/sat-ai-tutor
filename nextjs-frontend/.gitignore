@@ -1,0 +1,21 @@
+# Node Modules
+node_modules/
+.vscode/
+.next/
+dist/
+out/
+
+# Environment Files
+.env
+.env.local
+.env.production
+.env.development
+
+# Supabase Keys
+supabase/.env
+
+# Logs & Other Files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json

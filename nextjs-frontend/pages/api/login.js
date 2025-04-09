@@ -1,14 +1,26 @@
-export default function handler(req, res) {
+export const runtime = "edge";
+
+export default function handler(req) {
     if (req.method === "POST") {
       const { email, password } = req.body;
       
       if (email === "test@example.com" && password === "password") {
-        return res.status(200).json({ message: "Login successful" });
+        return new Response(
+          JSON.stringify({ message: "Login successful" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+        
       }
   
-      return res.status(401).json({ message: "Invalid credentials" });
+      return new Response(
+        JSON.stringify({ message: "Invalid credentials" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
     }
   
-    return res.status(405).json({ message: "Method Not Allowed" });
+    return new Response(
+      JSON.stringify({ message: "Method Not Allowed" }),
+      { status: 405, headers: { "Content-Type": "application/json" } }
+    );
   }
   

@@ -1,28 +1,46 @@
-import { BASE_URL } from "@/lib/config";
+export const runtime = "edge";
 
-export default async function handler(req, res) {
+import { NEXT_PUBLIC_BASE_URL } from "@/lib/config";
+
+export default async function handler(req) {
     if (req.method !== "GET") {
-      return res.status(405).json({ message: "Method Not Allowed" });
+      return new Response(
+        JSON.stringify({ message: "Method Not Allowed" }),
+        { status: 405, headers: { "Content-Type": "application/json" } }
+      );
     }
   
-    const { user_id } = req.query;
+    const { searchParams } = new URL(req.url);
+    const user_id = searchParams.get("user_id");
   
     if (!user_id) {
-      return res.status(400).json({ message: "Missing user_id" });
+      return new Response(
+        JSON.stringify({ message: "Missing user_id" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
     }
   
     try {
-      const response = await fetch(`${BASE_URL}/user-progress?user_id=${user_id}`);
+      const response = await fetch(`${NEXT_PUBLIC_BASE_URL}/user-progress?user_id=${user_id}`);
       const data = await response.json();
   
       if (!response.ok) {
-        return res.status(response.status).json(data);
+        return new Response(
+          JSON.stringify(data),
+          { status: response.status, headers: { "Content-Type": "application/json" } }
+        );
       }
   
-      return res.status(200).json(data);
+      return new Response(
+        JSON.stringify(data),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     } catch (error) {
       console.error("Error fetching user progress:", error);
-      return res.status(500).json({ message: "Internal Server Error", error: error.message });
+      return new Response(
+        JSON.stringify({ message: "Internal Server Error", error: error.message }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
   }
   

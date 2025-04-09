@@ -1,30 +1,49 @@
-import { BASE_URL } from "@/lib/config";
+export const runtime = "edge";
 
-export default async function handler(req, res) {
+import { NEXT_PUBLIC_BASE_URL } from "@/lib/config";
+
+export default async function handler(req) {
     if (req.method === "GET") {
-      const { topic, question } = req.query;
+      const { searchParams } = new URL(req.url);
+      const topic = searchParams.get("topic");
+      const question = searchParams.get("question");
   
       if (!topic || !question) {
-        return res.status(400).json({ error: "Topic and question are required" });
+        return new Response(
+          JSON.stringify({ error: "Topic and question are required" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
       }
   
       try {
-        const response = await fetch(`${BASE_URL}/generate-hint?topic=${topic}&question=${encodeURIComponent(question)}`);
+        const response = await fetch(`${NEXT_PUBLIC_BASE_URL}/generate-hint?topic=${topic}&question=${encodeURIComponent(question)}`);
         
         if (!response.ok) {
           const errorText = await response.text();
           console.error("FastAPI Hint API Error:", errorText);
-          return res.status(500).json({ error: `FastAPI returned an error: ${errorText}` });
+          return new Response(
+            JSON.stringify({ error: `FastAPI returned an error: ${errorText}` }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
         }
   
         const data = await response.json();
-        return res.status(200).json(data);
+        return new Response(
+          JSON.stringify(data),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
       } catch (error) {
         console.error("Error fetching AI-generated hint:", error);
-        return res.status(500).json({ error: "Failed to fetch AI-generated hint" });
+        return new Response(
+          JSON.stringify({ error: "Failed to fetch AI-generated hint" }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
       }
     }
   
-    return res.status(405).json({ message: "Method Not Allowed" });
+    return new Response(
+      JSON.stringify({ message: "Method Not Allowed" }),
+      { status: 405, headers: { "Content-Type": "application/json" } }
+    );
   }
   

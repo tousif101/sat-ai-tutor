@@ -1,14 +1,25 @@
-import { BASE_URL } from "@/lib/config";
+export const runtime = "edge";
 
-export default async function handler(req, res) {
+import { NEXT_PUBLIC_BASE_URL } from "@/lib/config";
+
+export default async function handler(req) {
     if (req.method !== "GET") {
-      return res.status(405).json({ message: "Method Not Allowed" });
+      return new Response(
+        JSON.stringify({ message: "Method Not Allowed" }),
+        { status: 405, headers: { "Content-Type": "application/json" } }
+      );
     }
   
-    const { user_id, topic, challenge_mode } = req.query;
+    const { searchParams } = new URL(req.url);
+    const user_id = searchParams.get("user_id");
+    const topic = searchParams.get("topic");
+    const challenge_mode = searchParams.get("challenge_mode");
   
     if (!user_id || !topic) {
-      return res.status(400).json({ message: "Missing required parameters" });
+      return new Response(
+        JSON.stringify({ message: "Missing required parameters" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
     }
   
     try {
@@ -16,21 +27,30 @@ export default async function handler(req, res) {
       const challengeModeParam = 
         challenge_mode === "true" || challenge_mode === true ? true : false;
       
-      const url = `${BASE_URL}/generate-adaptive-question?user_id=${user_id}&topic=${topic}&challenge_mode=${challengeModeParam}`;
+      const url = `${NEXT_PUBLIC_BASE_URL}/generate-adaptive-question?user_id=${user_id}&topic=${topic}&challenge_mode=${challengeModeParam}`;
       
       const response = await fetch(url);
       
       if (!response.ok) {
         const errorText = await response.text();
         console.error("FastAPI Error:", errorText);
-        return res.status(response.status).json({ error: `Failed to generate adaptive question: ${errorText}` });
+        return new Response(
+          JSON.stringify({ error: `Failed to generate adaptive question: ${errorText}` }),
+          { status: response.status, headers: { "Content-Type": "application/json" } }
+        );
       }
       
       const data = await response.json();
-      return res.status(200).json(data);
+      return new Response(
+        JSON.stringify(data),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
       
     } catch (error) {
       console.error("Error generating adaptive question:", error);
-      return res.status(500).json({ message: "Internal Server Error", error: error.message });
+      return new Response(
+        JSON.stringify({ message: "Internal Server Error", error: error.message }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
   }

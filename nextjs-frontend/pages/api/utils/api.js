@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 export async function loginUser(email, password) {
     const response = await fetch("/api/login", {
       method: "POST",

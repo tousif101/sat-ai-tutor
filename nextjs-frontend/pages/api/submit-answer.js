@@ -1,14 +1,13 @@
-export const runtime = "edge";
+import { BASE_URL } from "@/lib/config";
 
-import { NEXT_PUBLIC_BASE_URL } from "@/lib/config";
-
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method === "POST") {
     try {
       // Log the enhanced payload
       console.log("Enhanced submission payload:", req.body);
 
-      const response = await fetch(`${NEXT_PUBLIC_BASE_URL}/submit-answer`, {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+      const response = await fetch(`${BASE_URL}/submit-answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req.body),
@@ -21,21 +20,13 @@ export default async function handler(req) {
       }
 
       const data = await response.json();
-      return new Response(
-        JSON.stringify(data),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(200).json(data);
+
     } catch (error) {
       console.error("Error submitting answer:", error);
-      return new Response(
-        JSON.stringify({ error: error.message || "Failed to submit answer" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(500).json({ error: error.message || "Failed to submit answer" });
     }
   }
 
-  return new Response(
-    JSON.stringify({ message: "Method Not Allowed" }),
-    { status: 405, headers: { "Content-Type": "application/json" } }
-  );
+  return res.status(405).json({ message: "Method Not Allowed" });
 }

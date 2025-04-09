@@ -1,48 +1,30 @@
-export const runtime = "edge";
+import { BASE_URL } from "@/lib/config";
 
-import { NEXT_PUBLIC_BASE_URL } from "@/lib/config";
-
-export default async function handler(req) {
+export default async function handler(req, res) {
     if (req.method !== "GET") {
-      return new Response(
-        JSON.stringify({ message: "Method Not Allowed" }),
-        { status: 405, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(405).json({ message: "Method Not Allowed" });
     }
   
-    const { searchParams } = new URL(req.url);
-    const user_id = searchParams.get("user_id");
+    const { user_id } = req.query;
   
     if (!user_id) {
-      return new Response(
-        JSON.stringify({ message: "Missing user_id" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(400).json({ message: "Missing user_id" });
     }
   
     try {
-      const response = await fetch(`${NEXT_PUBLIC_BASE_URL}/user-stats/${user_id}`);
+      const response = await fetch(`${BASE_URL}/user-stats/${user_id}`);
       
       if (!response.ok) {
         const errorText = await response.text();
         console.error("FastAPI Error:", errorText);
-        return new Response(
-          JSON.stringify({ error: `Failed to fetch user stats: ${errorText}` }),
-          { status: response.status, headers: { "Content-Type": "application/json" } }
-        );
+        return res.status(response.status).json({ error: `Failed to fetch user stats: ${errorText}` });
       }
       
       const data = await response.json();
-      return new Response(
-        JSON.stringify(data),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(200).json(data);
       
     } catch (error) {
       console.error("Error fetching user stats:", error);
-      return new Response(
-        JSON.stringify({ message: "Internal Server Error", error: error.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      return res.status(500).json({ message: "Internal Server Error", error: error.message });
     }
   }

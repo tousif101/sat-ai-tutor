@@ -1,3 +1,5 @@
+import { BASE_URL } from "@/lib/config";
+
 export default async function handler(req, res) {
     if (req.method !== "GET") {
       return res.status(405).json({ message: "Method Not Allowed" });
@@ -14,7 +16,7 @@ export default async function handler(req, res) {
       const challengeModeParam = 
         challenge_mode === "true" || challenge_mode === true ? true : false;
       
-      const url = `http://127.0.0.1:8000/generate-adaptive-question?user_id=${user_id}&topic=${topic}&challenge_mode=${challengeModeParam}`;
+      const url = `${BASE_URL}/generate-adaptive-question?user_id=${user_id}&topic=${topic}&challenge_mode=${challengeModeParam}`;
       
       const response = await fetch(url);
       

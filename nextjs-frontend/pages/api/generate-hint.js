@@ -1,3 +1,5 @@
+import { BASE_URL } from "@/lib/config";
+
 export default async function handler(req, res) {
     if (req.method === "GET") {
       const { topic, question } = req.query;
@@ -7,7 +9,7 @@ export default async function handler(req, res) {
       }
   
       try {
-        const response = await fetch(`http://127.0.0.1:8000/generate-hint?topic=${topic}&question=${encodeURIComponent(question)}`);
+        const response = await fetch(`${BASE_URL}/generate-hint?topic=${topic}&question=${encodeURIComponent(question)}`);
         
         if (!response.ok) {
           const errorText = await response.text();

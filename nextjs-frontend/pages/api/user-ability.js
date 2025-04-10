@@ -1,3 +1,5 @@
+import { BASE_URL } from "@/lib/config";
+
 export default async function handler(req, res) {
     if (req.method !== "GET") {
       return res.status(405).json({ message: "Method Not Allowed" });
@@ -10,7 +12,7 @@ export default async function handler(req, res) {
     }
   
     try {
-      const response = await fetch(`http://127.0.0.1:8000/user-ability/${user_id}`);
+      const response = await fetch(`${BASE_URL}/user-ability/${user_id}`);
       
       if (!response.ok) {
         const errorText = await response.text();

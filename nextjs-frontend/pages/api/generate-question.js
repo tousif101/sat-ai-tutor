@@ -1,9 +1,11 @@
+import { BASE_URL } from "@/lib/config";
+
 export default async function handler(req, res) {
   if (req.method === "GET") {
     const { topic } = req.query;
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/generate-question?topic=${topic}`);
+      const response = await fetch(`${BASE_URL}/generate-question?topic=${topic}`);
       if (!response.ok) {
         throw new Error("FastAPI failed to generate a question.");
       }

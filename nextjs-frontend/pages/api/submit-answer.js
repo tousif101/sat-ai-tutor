@@ -1,10 +1,13 @@
+import { BASE_URL } from "@/lib/config";
+
 export default async function handler(req, res) {
   if (req.method === "POST") {
     try {
       // Log the enhanced payload
       console.log("Enhanced submission payload:", req.body);
 
-      const response = await fetch("http://127.0.0.1:8000/submit-answer", {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+      const response = await fetch(`${BASE_URL}/submit-answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req.body),

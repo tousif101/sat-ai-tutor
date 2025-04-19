@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useRouter } from "next/router";
 import Link from "next/link";
+import MathRenderer from "../components/MathRenderer";
+
+
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -265,6 +268,10 @@ export default function Dashboard() {
             <Link href="/performance" className="px-4 py-2 bg-green-500 text-white rounded">
               View Performance
             </Link>
+
+            <Link href="/leaderboard" className="px-4 py-2 bg-purple-500 text-white rounded">
+              Leaderboard
+            </Link>
           </div>
         </div>
 
@@ -410,8 +417,9 @@ export default function Dashboard() {
             )}
     
             <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-              <p className="text-lg">{questionData.question}</p>
-              
+              {/* <p className="text-lg">{questionData.question}</p> */}
+              <MathRenderer content={questionData.question} />
+
               {/* Display timer if question is active */}
               {questionStartTime && (
                 <div className="text-sm text-gray-500 mt-2">
@@ -434,7 +442,10 @@ export default function Dashboard() {
                           checked={userAnswer === key}
                           onChange={() => setUserAnswer(key)} 
                         />
-                        <span><strong>{key}:</strong> {value}</span>
+                        <span>
+                          {/* <strong>{key}:</strong> {value} */}
+                          <strong>{key}:</strong> <MathRenderer content={value} />
+                          </span>
                       </label>
                     </div>
                   ))}
@@ -479,7 +490,8 @@ export default function Dashboard() {
             {showHint && (
               <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
                 <h3 className="font-medium text-yellow-800">Hint:</h3>
-                <p className="text-gray-700">{hint}</p>
+                {/* <p className="text-gray-700">{hint}</p> */}
+                <MathRenderer content={hint} />
               </div>
             )}
             
@@ -491,7 +503,8 @@ export default function Dashboard() {
                 {!isCorrect && (
                   <div className="mt-1">
                     <p><strong>Correct Answer:</strong> {questionData.correct_answer}</p>
-                    <p className="mt-1"><strong>Explanation:</strong> {questionData.solution}</p>
+                    {/* <p className="mt-1"><strong>Explanation:</strong> {questionData.solution}</p> */}
+                    <p className="mt-1"><strong>Explanation:</strong> <MathRenderer content={questionData.solution} /></p>
                   </div>
                 )}
               </div>

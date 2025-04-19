@@ -11,6 +11,9 @@ export default function Navbar() {
         <Link href="/performance" className="mr-4">
           Performance
         </Link>
+        <Link href="/leaderboard" className="mr-4">
+          Leaderboard
+        </Link>
         <Link href="/login">
           Login
         </Link>

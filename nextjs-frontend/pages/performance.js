@@ -79,8 +79,14 @@ export default function PerformanceDashboard() {
         const firstAvg = firstThree.reduce((sum, item) => sum + item.time_taken, 0) / 3;
         const lastAvg = lastThree.reduce((sum, item) => sum + item.time_taken, 0) / 3;
         
-        const improvement = ((firstAvg - lastAvg) / firstAvg) * 100;
-        improvements[topic] = improvement;
+        // Add this check to avoid division by zero or very small values
+        if (firstAvg > 0.001) {
+          const improvement = ((firstAvg - lastAvg) / firstAvg) * 100;
+          // Add this check to handle infinity values
+          improvements[topic] = isFinite(improvement) ? improvement : 0;
+        } else {
+          improvements[topic] = 0;
+        }
       }
     });
     
@@ -174,11 +180,11 @@ export default function PerformanceDashboard() {
                           <td className="px-4 py-3 text-center">{data.average_time.toFixed(0)}s</td>
                           {timeImprovements && (
                             <td className="px-4 py-3 text-center">
-                              {timeImprovements[topic] ? (
-                                <span className={timeImprovements[topic] > 0 ? "text-green-600" : "text-red-600"}>
-                                  {timeImprovements[topic] > 0 ? "+" : ""}{timeImprovements[topic].toFixed(1)}%
-                                </span>
-                              ) : "N/A"}
+                              {timeImprovements[topic] !== undefined ? (
+                                  <span className={timeImprovements[topic] > 0 ? "text-green-600" : "text-red-600"}>
+                                    {timeImprovements[topic] > 0 ? "+" : ""}{timeImprovements[topic].toFixed(1)}%
+                                  </span>
+                                ) : "N/A"}
                             </td>
                           )}
                         </tr>

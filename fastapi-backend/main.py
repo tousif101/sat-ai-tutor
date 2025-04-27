@@ -5,13 +5,16 @@ from langchain_core.prompts import PromptTemplate
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from supabase import create_client, Client
 from datetime import datetime
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferMemory
 from langchain.llms import OpenAI
-from typing import Optional
+from typing import Optional, Dict
+from leaderboard import router as leaderboard_router
+
+
 
 # Import our modules
 from performance_tracking import router as performance_router, EnhancedUserAnswer
@@ -24,8 +27,12 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SERVICE_KEY   = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+print("SERVICE_KEY prefix:", SERVICE_KEY[:15] if SERVICE_KEY else "None")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SERVICE_KEY)
+service_supabase = supabase                                   # reuse it
+
 app = FastAPI()
 
 # CORS for Next.js
@@ -41,23 +48,85 @@ ALLOWED_TOPICS = {"Algebra", "Geometry", "Grammar", "Reading Comprehension", "Tr
 # Include the routers
 app.include_router(performance_router, tags=["Performance Tracking"])
 app.include_router(adaptive_router, tags=["Adaptive Difficulty"])
+app.include_router(leaderboard_router, tags=["Leaderboard"])
 
-# Define the SAT Question Model
+# Define the SAT Question Model with enhanced validation
 class SATQuestion(BaseModel):
     topic: str
     question: str
-    choices: dict
+    choices: Dict[str, str]
     correct_answer: str
     solution: str
     hint: str
-    passage: Optional[str] = None  
+    passage: Optional[str] = None
+    
+    # Add validation for choices and correct_answer
+    @validator('choices')
+    def validate_choices(cls, v):
+        # Ensure choices contains exactly keys A, B, C, D
+        required_keys = {'A', 'B', 'C', 'D'}
+        if set(v.keys()) != required_keys:
+            raise ValueError(f"Choices must contain exactly keys {required_keys}")
+        
+        # Ensure choice values are not empty
+        for key, value in v.items():
+            if not value.strip():
+                raise ValueError(f"Choice {key} cannot be empty")
+        
+        return v
+    
+    @validator('correct_answer')
+    def validate_correct_answer(cls, v, values):
+        # Ensure correct_answer is one of the choices
+        if 'choices' in values and v not in values['choices']:
+            raise ValueError(f"Correct answer '{v}' must be one of the choices keys")
+        return v
+    
+    @validator('solution')
+    def validate_solution_consistency(cls, solution, values):
+        """Validate that the solution is consistent with the correct answer."""
+        if 'choices' not in values or 'correct_answer' not in values:
+            return solution
+            
+        correct_answer = values['correct_answer']
+        correct_choice = values['choices'].get(correct_answer, '')
+        
+        # Basic consistency check - the correct answer value should appear in the solution
+        # This is a heuristic and might need refinement
+        if correct_choice:
+            # Extract just the number from the choice (assuming it's a number)
+            import re
+            match = re.search(r'\b(\d+)\b', correct_choice)
+            if match:
+                number = match.group(1)
+                # Check if this number appears in the conclusion of the solution
+                if number not in solution.split('=')[-1]:
+                    raise ValueError(f"Solution appears inconsistent with correct answer '{correct_answer}': {correct_choice}")
+        
+        return solution
 
-# Generate SAT Question + Hint Using LangChain
-def generate_sat_question(topic: str, difficulty_level: int = 3) -> dict:
-    llm = ChatOpenAI(model_name="gpt-4o", openai_api_key=OPENAI_API_KEY)
+@app.get("/test-db-permissions")
+async def test_db_permissions():
+    try:
+        # Try different operations
+        table_list = []
+        for table in ["user_progress", "users", "auth.users"]:
+            try:
+                result = supabase.table(table).select("*").limit(1).execute()
+                table_list.append({"table": table, "status": "success", "data": result.data})
+            except Exception as e:
+                table_list.append({"table": table, "status": "error", "error": str(e)})
+        
+        return {"results": table_list}
+    except Exception as e:
+        return {"error": str(e)}
+    
+# Generate SAT Question + Hint Using LangChain with retry mechanism
+def generate_sat_question(topic: str, difficulty_level: int = 3, max_retries: int = 3) -> dict:
+    llm = ChatOpenAI(model_name="gpt-4o", openai_api_key=OPENAI_API_KEY, temperature=0.7)
     parser = JsonOutputParser(pydantic_object=SATQuestion)
 
-    # Updated prompt to include difficulty level
+    # Updated prompt to include difficulty level and clearer instructions for choices
     difficulty_descriptions = {
         1: "very easy (suitable for beginners)",
         2: "somewhat easy (for review)",
@@ -71,52 +140,86 @@ def generate_sat_question(topic: str, difficulty_level: int = 3) -> dict:
     # Create different templates based on topic
     if topic == "Reading Comprehension":
         prompt = PromptTemplate(
-            template="Generate a {difficulty} SAT Reading Comprehension question with the following format:\n"
-                     "1. First, create a passage (about 200-300 words) on a topic suitable for SAT.\n"
-                     "2. Then, create a question about the passage.\n"
-                     "3. Provide four answer choices (A, B, C, D).\n"
-                     "4. Include a hint before revealing the correct answer.\n"
-                     "5. Explain why the correct answer is correct.\n\n"
-                     "The question should be labeled as 'question' and should ONLY ask about the passage you generated.\n"
-                     "The passage should be labeled as 'passage' in your JSON output.\n"
-                     "{format_instructions}",
+            template="""Generate a {difficulty} SAT Reading Comprehension question with the following format:
+
+1. First, create a passage (about 200-300 words) on a topic suitable for SAT.
+2. Then, create a question about the passage.
+3. Provide exactly four answer choices labeled A, B, C, and D (use these exact keys).
+4. Your correct_answer field must contain only one of these letters: A, B, C, or D.
+5. Include a hint before revealing the correct answer.
+6. Explain why the correct answer is correct and why the others are incorrect.
+
+The question should be labeled as 'question' and should ONLY ask about the passage you generated.
+The passage should be labeled as 'passage' in your JSON output.
+
+IMPORTANT: Ensure that:
+- The choices field contains exactly four key-value pairs with keys 'A', 'B', 'C', and 'D'
+- The correct_answer field contains only one of these letters: 'A', 'B', 'C', or 'D'
+- Each answer choice should be distinct and substantial
+
+{format_instructions}""",
             input_variables=["difficulty"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
     else:
         prompt = PromptTemplate(
-            template="Generate a {difficulty} multiple-choice SAT question about {topic}. "
-                     "Provide four answer choices (A, B, C, D). Include a hint before revealing the correct answer. "
-                     "{format_instructions}",
+            template="""Generate a {difficulty} multiple-choice SAT question about {topic}.
+
+REQUIREMENTS:
+1. Provide exactly four answer choices labeled A, B, C, D (use these exact keys).
+2. The 'choices' field in your JSON must be a dictionary with exactly these four keys: 'A', 'B', 'C', 'D'.
+3. Your correct_answer field must contain only one of these letters: A, B, C, or D.
+4. Include a hint that guides the student without giving away the answer.
+5. Provide a detailed solution that explains why the correct answer is correct.
+6. Make the question realistic for SAT and age-appropriate.
+
+IMPORTANT: Ensure that:
+- The choices field contains exactly four key-value pairs with keys 'A', 'B', 'C', and 'D'
+- The correct_answer field contains only one of these letters: 'A', 'B', 'C', or 'D'
+- Each answer choice should be distinct and substantial
+
+{format_instructions}""",
             input_variables=["topic", "difficulty"],
             partial_variables={"format_instructions": parser.get_format_instructions()},
         )
 
-    # Invoke LLM with appropriate parameters
-    if topic == "Reading Comprehension":
-        response_dict = (prompt | llm | parser).invoke({"difficulty": difficulty_desc})
-    else:
-        response_dict = (prompt | llm | parser).invoke({
-            "topic": topic, 
-            "difficulty": difficulty_desc
-        })
+    # Implement retry logic
+    for attempt in range(max_retries):
+        try:
+            # Invoke LLM with appropriate parameters
+            if topic == "Reading Comprehension":
+                response_dict = (prompt | llm | parser).invoke({"difficulty": difficulty_desc})
+            else:
+                response_dict = (prompt | llm | parser).invoke({
+                    "topic": topic, 
+                    "difficulty": difficulty_desc
+                })
 
-    # Convert to Pydantic model
-    question_obj = SATQuestion(**response_dict)
-    question_data = question_obj.dict()
+            # Convert to Pydantic model - this will run the validators
+            question_obj = SATQuestion(**response_dict)
+            question_data = question_obj.dict()
 
-    # Add metadata about the difficulty level
-    question_data["difficulty_level"] = difficulty_level
-    
-    result = supabase.table("questions").insert(question_data).execute()
+            # Add metadata about the difficulty level
+            question_data["difficulty_level"] = difficulty_level
+            
+            result = supabase.table("questions").insert(question_data).execute()
 
-    if not result.data:
-        raise HTTPException(status_code=500, detail="Failed to insert question into database.")
+            if not result.data:
+                raise HTTPException(status_code=500, detail="Failed to insert question into database.")
 
-    inserted_id = result.data[0]["id"]  # Ensure Supabase returns the ID
+            inserted_id = result.data[0]["id"]  # Ensure Supabase returns the ID
 
-    question_data["question_id"] = inserted_id
-    return question_data
+            question_data["question_id"] = inserted_id
+            return question_data
+            
+        except (ValueError, HTTPException) as e:
+            if attempt == max_retries - 1:  # Last attempt
+                print(f"Failed to generate valid question after {max_retries} attempts: {str(e)}")
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to generate a valid question: {str(e)}"
+                )
+            print(f"Attempt {attempt+1} failed: {str(e)}. Retrying...")
 
 @app.get("/generate-question")
 async def generate_question(
@@ -209,22 +312,47 @@ async def submit_answer(answer: EnhancedUserAnswer):
     try:
         print("📌 Received Answer Submission:", answer.dict())
 
-        # Create a dict from the model, manually handling the timestamp
         answer_dict = answer.dict(exclude={"timestamp"})
-        
-        # Add the current timestamp in ISO format
         answer_dict["timestamp"] = datetime.utcnow().isoformat()
 
-        response = supabase.table("user_progress").insert(answer_dict).execute()
+        # response = service_supabase.table("user_progress").insert(answer_dict).execute()
 
-        if response.data and isinstance(response.data, dict) and "error" in response.data:
-            raise HTTPException(status_code=500, detail=response.data["error"])
+        # if response.data and isinstance(response.data, dict) and "error" in response.data:
+        #     raise HTTPException(status_code=500, detail=response.data["error"])
 
         return {"message": "Answer recorded successfully!"}
 
     except Exception as e:
-        print("❌ Error submitting answer:", str(e))
+        print("Error submitting answer:", str(e))
         raise HTTPException(status_code=400, detail=str(e))
+# @app.post("/submit-answer")
+# async def submit_answer(answer: EnhancedUserAnswer):
+#     try:
+
+#         print(f"Authenticated User ID: {answer.user_id}")
+        
+#         # Additional validation
+#         if not answer.user_id:
+#             raise HTTPException(status_code=400, detail="Invalid user ID")
+
+#         print("📌 Received Answer Submission:", answer.dict())
+
+#         # Create a dict from the model, manually handling the timestamp
+#         answer_dict = answer.dict(exclude={"timestamp"})
+        
+#         # Add the current timestamp in ISO format
+#         answer_dict["timestamp"] = datetime.utcnow().isoformat()
+
+#         response = supabase.table("user_progress").insert(answer_dict).execute()
+
+#         if response.data and isinstance(response.data, dict) and "error" in response.data:
+#             raise HTTPException(status_code=500, detail=response.data["error"])
+
+#         return {"message": "Answer recorded successfully!"}
+
+#     except Exception as e:
+#         print("❌ Error submitting answer:", str(e))
+#         raise HTTPException(status_code=400, detail=str(e))
 
 class TutorChatRequest(BaseModel):
     user_id: str
@@ -335,3 +463,4 @@ async def get_user_chat(user_id: str = Query(...)):
         return response.data or []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    

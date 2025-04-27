@@ -49,28 +49,28 @@ class EnhancedUserAnswer(BaseModel):
         }
 
 # Submit enhanced answer endpoint
-@router.post("/submit-answer")
-async def submit_answer(answer: EnhancedUserAnswer):
-    try:
-        # Create a dict from the model, manually handling the timestamp
-        answer_dict = answer.dict(exclude={"timestamp"})
+# @router.post("/submit-answer")
+# async def submit_answer(answer: EnhancedUserAnswer):
+#     try:
+#         # Create a dict from the model, manually handling the timestamp
+#         answer_dict = answer.dict(exclude={"timestamp"})
         
-        # Add the current timestamp in ISO format
-        answer_dict["timestamp"] = datetime.utcnow().isoformat()
+#         # Add the current timestamp in ISO format
+#         answer_dict["timestamp"] = datetime.utcnow().isoformat()
             
-        print("📌 Received Enhanced Answer Submission:", answer_dict)
+#         print("📌 Received Enhanced Answer Submission:", answer_dict)
         
-        # Save enhanced answer to Supabase with serialized timestamp
-        response = supabase.table("user_progress").insert(answer_dict).execute()
+#         # Save enhanced answer to Supabase with serialized timestamp
+#         response = supabase.table("user_progress").insert(answer_dict).execute()
         
-        if response.data and isinstance(response.data, dict) and "error" in response.data:
-            raise HTTPException(status_code=500, detail=response.data["error"])
+#         if response.data and isinstance(response.data, dict) and "error" in response.data:
+#             raise HTTPException(status_code=500, detail=response.data["error"])
             
-        return {"message": "Answer recorded successfully!", "data": response.data}
+#         return {"message": "Answer recorded successfully!", "data": response.data}
         
-    except Exception as e:
-        print("❌ Error submitting enhanced answer:", str(e))
-        raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         print("❌ Error submitting enhanced answer:", str(e))
+#         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/user-stats/{user_id}")
 async def get_user_stats(user_id: str):

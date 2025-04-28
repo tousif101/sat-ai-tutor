@@ -13,6 +13,7 @@ from langchain.memory import ConversationBufferMemory
 from langchain.llms import OpenAI
 from typing import Optional, Dict
 from leaderboard import router as leaderboard_router
+from fastapi import BackgroundTasks
 
 
 
@@ -315,16 +316,61 @@ async def submit_answer(answer: EnhancedUserAnswer):
         answer_dict = answer.dict(exclude={"timestamp"})
         answer_dict["timestamp"] = datetime.utcnow().isoformat()
 
-        # response = service_supabase.table("user_progress").insert(answer_dict).execute()
+        response = service_supabase.table("user_progress").insert(answer_dict).execute()
 
-        # if response.data and isinstance(response.data, dict) and "error" in response.data:
-        #     raise HTTPException(status_code=500, detail=response.data["error"])
+        # Check for database errors
+        if response.data and isinstance(response.data, dict) and "error" in response.data:
+            raise HTTPException(status_code=500, detail=response.data["error"])
 
+        background_tasks = BackgroundTasks()
+        background_tasks.add_task(update_leaderboard_entry, answer.user_id)
+        
+        # Success! Now update leaderboard directly here rather than relying on a database trigger
         return {"message": "Answer recorded successfully!"}
 
     except Exception as e:
         print("Error submitting answer:", str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    
+
+async def update_leaderboard_entry(user_id):
+    try:
+        # Same implementation as before, but with extra error handling
+        progress_response = service_supabase.table("user_progress") \
+            .select("user_id,correct,difficulty_level") \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        # Process data to calculate stats
+        total_questions = len(progress_response.data)
+        correct_answers = sum(1 for record in progress_response.data if record.get("correct", False))
+        difficulty_sum = sum(record.get("difficulty_level", 1) for record in progress_response.data)
+        points = sum(record.get("difficulty_level", 1) * 10 for record in progress_response.data if record.get("correct", False))
+        
+        # Calculate derived stats
+        accuracy = (correct_answers / total_questions * 100) if total_questions > 0 else 0
+        avg_difficulty = difficulty_sum / total_questions if total_questions > 0 else 0
+        
+        # Get existing email if possible
+        email_query = service_supabase.table("leaderboards").select("email").eq("user_id", user_id).execute()
+        email = email_query.data[0]["email"] if email_query.data else "Anonymous"
+        
+        # Update leaderboard
+        service_supabase.table("leaderboards").upsert({
+            "user_id": user_id,
+            "email": email,
+            "total_questions": total_questions,
+            "correct_answers": correct_answers,
+            "accuracy": accuracy,
+            "avg_difficulty": avg_difficulty,
+            "total_points": points,
+            "updated_at": datetime.utcnow().isoformat()
+        }).execute()
+        
+        print(f"Successfully updated leaderboard for user {user_id}")
+    except Exception as e:
+        print(f"Error updating leaderboard for user {user_id}: {str(e)}")
+        # Log the error but don't propagate it
 # @app.post("/submit-answer")
 # async def submit_answer(answer: EnhancedUserAnswer):
 #     try:
